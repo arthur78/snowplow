@@ -61,9 +61,9 @@ class ExtractEventTypeSpec extends Specification with DataTables with Validation
     }
 
   val SeventiesTstamp = Some(new DateTime(0, DateTimeZone.UTC))
-  val BCTstamp = SeventiesTstamp.map(_.minusYears(2000))
-  val FarAwayTstamp = SeventiesTstamp.map(_.plusYears(10000))
-  def e3 =
+  val BCTstamp        = SeventiesTstamp.map(_.minusYears(2000))
+  val FarAwayTstamp   = SeventiesTstamp.map(_.plusYears(10000))
+  def e3              =
 // format: off
     "SPEC NAME"          || "INPUT VAL"     | "EXPECTED OUTPUT"                                                                                     |
     "None"               !! None            ! "No collector_tstamp set".fail                                                                        |
@@ -76,10 +76,12 @@ class ExtractEventTypeSpec extends Specification with DataTables with Validation
     }
 
   def e4 =
+// format: off
     "SPEC NAME" || "INPUT VAL"               | "EXPECTED OUTPUT"                                                                                               |
     "Not long"  !! ("f", "v")                ! "Field [f]: [v] is not in the expected format (ms since epoch)".fail                                            |
     "Too long"  !! ("f", "1111111111111111") ! "Field [f]: [1111111111111111] is formatted as [37179-09-17 07:18:31.111] which isn't Redshift-compatible".fail |
     "Valid ts"  !! ("f", "1")                ! "1970-01-01 00:00:00.001".success                                                                               |> {
+// format: off
       (_, input, expected) => EventEnrichments.extractTimestamp(input._1, input._2) must_== (expected)
     }
 }
