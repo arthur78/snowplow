@@ -26,6 +26,7 @@ import iglu.client.Resolver
 import common.enrichments.EnrichmentRegistry
 import model.EnrichConfig
 import scalatracker.Tracker
+import scalaz._
 
 /**
  * Source to allow the testing framework to enrich events
@@ -38,6 +39,10 @@ class TestSource(
   enrichmentRegistry: EnrichmentRegistry,
   tracker: Option[Tracker]
 ) extends AbstractSource(config, igluResolver, enrichmentRegistry, tracker) {
+
+  override def enrichEvents(binaryData: Array[Byte], outputAsJson: Boolean = false): List[Validation[(String, String), (String, String)]] = {
+    super.enrichEvents(binaryData, outputAsJson)
+  }
 
   override def run(): Unit =
     throw new RuntimeException("run() should not be called on TestSource")
