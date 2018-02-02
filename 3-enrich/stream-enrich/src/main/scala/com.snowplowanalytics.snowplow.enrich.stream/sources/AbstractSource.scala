@@ -45,7 +45,7 @@ import iglu.client.Resolver
 import model._
 import scalatracker.Tracker
 import sinks._
-import com.snowplowanalytics.snowplow.analytics.scalasdk.json.EventTransformer
+import com.snowplowanalytics.snowplow.analytics.scalasdk.json.{EventTransformer, ValidatedEvent}
 
 object AbstractSource {
   /** Kinesis records must not exceed 1MB */
@@ -105,8 +105,6 @@ abstract class AbstractSource(
   enrichmentRegistry: EnrichmentRegistry,
   tracker: Option[Tracker]
 ) {
-
-  val outputAsJson = true  // TODO: Make configurable.
 
   val MaxRecordSize = if (config.sinkType == KinesisSink) {
     Some(AbstractSource.MaxBytes)
@@ -186,7 +184,7 @@ abstract class AbstractSource(
    * @return List containing successful or failed events, each with a
    *         partition key
    */
-  def enrichEvents(binaryData: Array[Byte]): List[Validation[(String, String), (String, String)]] = {
+  def enrichEvents(binaryData: Array[Byte], outputAsJson: Boolean = true): List[Validation[(String, String), (String, String)]] = {
     val canonicalInput: ValidatedMaybeCollectorPayload = ThriftLoader.toCollectorPayload(binaryData)
     val processedEvents: List[ValidationNel[String, EnrichedEvent]] = EtlPipeline.processEvents(
       enrichmentRegistry,
@@ -196,16 +194,59 @@ abstract class AbstractSource(
     processedEvents.map(validatedMaybeEvent => {
       validatedMaybeEvent match {
         case Success(co) =>
-          var out = tabSeparateEnrichedEvent(co)
+          val tsv = tabSeparateEnrichedEvent(co)
           if (outputAsJson) {
-            out = EventTransformer.transform(out).merge.toString  // Success implied. TODO: Support failures?
+            asJson(tsv, co, binaryData)
+          } else {
+            (tsv, getProprertyValue(co, config.streams.out.partitionKey)).success
           }
-          (out, getProprertyValue(co, config.streams.out.partitionKey)).success
         case Failure(errors) =>
           val line = new String(Base64.encodeBase64(binaryData), UTF_8)
           (BadRow(line, errors).toCompactJson -> Random.nextInt.toString).fail
       }
     })
+  }
+
+  /**
+    * Convert an enriched event represented in TSV format to JSON, and return a successful or failed event,
+    * depending on whether the transformation is successful.
+    *
+    * @param tsv Enriched event as TSV
+    * @param co Enriched event object
+    * @param binaryData Thrift raw event.
+    * @return A successful event in case transformation to JSON is successful; failed event otherwise.
+    */
+  def asJson(tsv: String, co: EnrichedEvent, binaryData: Array[Byte]): Validation[(String, String), (String, String)] = {
+    val json = _tsv2json(tsv)
+    if (json.isRight) {
+      val tweakedJson = tweakJson(json.right.toOption.get)
+      (tweakedJson, getProprertyValue(co, config.streams.out.partitionKey)).success
+    } else {
+      val errors = NonEmptyList(json.left.get.head)
+      val line = new String(Base64.encodeBase64(binaryData), UTF_8)
+      (BadRow(line, errors).toCompactJson -> Random.nextInt.toString).fail
+    }
+  }
+
+  /**
+    * This is just a wrapper to facilitate testability (mocking).
+    *
+    * In one of the tests I had to stub the EventTransformer's "transform" method,
+    * but wasn't able to achieve that using Mockito. This is why I had to resort to
+    * creation of such a wrapper.
+    */
+  def _tsv2json(tsv: String): ValidatedEvent = EventTransformer.transform(tsv)
+
+  /**
+    * Apply necessary tweaks to the JSON output.
+    *
+    * @param json Snowplow enriched event as JSON string
+    * @return Tweaked JSON, eg. with additional domain-specific fields added.
+    */
+  def tweakJson(json: String): String = {
+    val parsedJson = parse(json)
+    var tweakedJson = UpworkSpecificJsonOutputTweaking.addEventSchema(parsedJson)
+    compact(render(tweakedJson))
   }
 
   /**
